@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -16,11 +17,15 @@ from app.db import models, schemas
 
 logger = logging.getLogger(__name__)
 
+
 NOUVELAIR_AVAILABILITY_API = "https://webapi.nouvelair.com/api/reservation/availability"
 NOUVELAIR_URL = "https://www.nouvelair.com/"
 NOUVELAIR_CURRENCY_ID = 2
 NOUVELAIR_AIRLINE_CODE = "BJ"
-nouvelair_api_key: str | None = None
+
+_nouvelair_api_key: str | None = None
+_nouvelair_lock = asyncio.Lock()
+
 
 TUNISAIR_BASE_URL_DE = "https://flights.tunisair.com/en-de/prices/per-day"
 TUNISAIR_BASE_URL_BE = "https://flights.tunisair.com/en-be/prices/per-day"
@@ -33,6 +38,7 @@ TUNISAIR_MONTHS_TO_SEARCH = 4
 TUNISAIR_DEFAULT_TRIP_TYPE = "O"
 TUNISAIR_DEFAULT_TRIP_DURATION = "0"
 TUNISAIR_REQUEST_RETRIES = 3
+
 
 TUNISAIR_VALID_ROUTES_DE_TO_TN: List[Tuple[str, str]] = [
     ("MUC", "TUN"),
@@ -104,14 +110,15 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
                 updated_flights_for_alerting.append(
                     {"flight": existing_flight, "old_price_eur": old_price_eur}
                 )
+
     logger.info(
         f"Processed report: {new_flights_count} new flights, {updated_prices_count} updated prices."
     )
     return updated_flights_for_alerting
 
 
-async def _nouvelair_capture_api_key():
-    global nouvelair_api_key
+async def _nouvelair_capture_api_key() -> str | None:
+    """Launch a headless browser to intercept the Nouvelair x-api-key header."""
     logger.info("Launching headless browser to capture Nouvelair API key...")
     captured_key = None
     async with async_playwright() as p:
@@ -138,20 +145,33 @@ async def _nouvelair_capture_api_key():
             logger.error(f"Error during Playwright API key capture for Nouvelair: {e}")
         finally:
             await browser.close()
+
     if captured_key:
-        nouvelair_api_key = captured_key
         logger.info("Nouvelair API Key successfully secured.")
     else:
         logger.error("Failed to capture Nouvelair API key within the time limit.")
+    return captured_key
+
+
+async def _get_or_refresh_nouvelair_api_key() -> str | None:
+    """Return a cached API key, or capture a fresh one if not available."""
+    global _nouvelair_api_key
+    async with _nouvelair_lock:
+        if not _nouvelair_api_key:
+            _nouvelair_api_key = await _nouvelair_capture_api_key()
+        return _nouvelair_api_key
 
 
 async def _get_nouvelair_flight_availability(
     session: httpx.AsyncClient, dep_code: str, dest_code: str
 ) -> List[Dict[str, Any]]:
+    api_key = await _get_or_refresh_nouvelair_api_key()
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Origin": NOUVELAIR_URL,
-        "x-api-key": nouvelair_api_key or "",
+        "Referer": NOUVELAIR_URL,
+        "Accept": "application/json",
+        "x-api-key": api_key or "",
     }
     params = {
         "departure_code": dep_code,
@@ -161,52 +181,84 @@ async def _get_nouvelair_flight_availability(
     }
     try:
         res = await session.get(
-            NOUVELAIR_AVAILABILITY_API, params=params, headers=headers, timeout=20
+            NOUVELAIR_AVAILABILITY_API,
+            params=params,
+            headers=headers,
+            timeout=20,
+            follow_redirects=False,
         )
+        if res.is_redirect or res.status_code == 302:
+            logger.warning(
+                f"Nouvelair returned redirect for {dep_code}->{dest_code}. "
+                "API key may be stale — invalidating for next run."
+            )
+            async with _nouvelair_lock:
+                global _nouvelair_api_key
+                _nouvelair_api_key = None
+            return []
+
         res.raise_for_status()
         return res.json().get("data", [])
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"HTTP error fetching Nouvelair availability for {dep_code}->{dest_code}: "
+            f"{e.response.status_code} {e.response.text[:200]}"
+        )
+        return []
     except httpx.RequestError as e:
         logger.error(
-            f"Error fetching Nouvelair availability for {dep_code}->{dest_code}: {e}"
+            f"Network error fetching Nouvelair availability for {dep_code}->{dest_code}: {e}"
         )
         return []
 
 
 async def run_nouvelair_job(db: Session):
     logger.info("--- Starting Nouvelair scraper run ---")
-    await _nouvelair_capture_api_key()
-    if not nouvelair_api_key:
+
+    global _nouvelair_api_key
+    async with _nouvelair_lock:
+        _nouvelair_api_key = None
+    _nouvelair_api_key = await _nouvelair_capture_api_key()
+
+    if not _nouvelair_api_key:
         logger.critical("Nouvelair scraper run aborted: Could not obtain API key.")
         return
+
     airports_list = airport.get_airports(db)
     if not airports_list:
         logger.critical(
             "Nouvelair scraper run aborted: Could not fetch airport list from backend."
         )
         return
+
     tunisian_airports = [a.code for a in airports_list if a.country == "TN"]
     german_airports = [a.code for a in airports_list if a.country == "DE"]
     routes = list(product(tunisian_airports, german_airports)) + list(
         product(german_airports, tunisian_airports)
     )
-    logger.info("--- Starting Nouvelair scraping for routes ---")
+
+    logger.info(f"Scraping {len(routes)} Nouvelair routes...")
     scraped_data_payload = schemas.ScrapedDataPayload(flights=[])
 
     async with httpx.AsyncClient() as session:
+        conversion_rate = await _get_tunisair_exchange_rate(session)
+
         for dep_code, arr_code in routes:
-            for f in await _get_nouvelair_flight_availability(
+            flights_data = await _get_nouvelair_flight_availability(
                 session, dep_code, arr_code
-            ):
+            )
+            for f in flights_data:
                 try:
                     price = float(f["price"])
                     if price <= 0:
                         continue
                     departure_date = datetime.strptime(f["date"], "%Y-%m-%d")
+                    price_eur = round(price * conversion_rate, 2)
                     scraped_data_payload.flights.append(
                         schemas.ScrapedFlight(
                             departureDate=departure_date,
                             price=price,
-                            priceEur=price,
+                            priceEur=price_eur,
                             departureAirportCode=dep_code,
                             arrivalAirportCode=arr_code,
                             airlineCode=NOUVELAIR_AIRLINE_CODE,
@@ -216,9 +268,7 @@ async def run_nouvelair_job(db: Session):
                     logger.warning(
                         f"Skipping malformed Nouvelair flight record: {f}. Error: {e}"
                     )
-            time.sleep(
-                1
-            )  # Consider removing or making this async if performance is critical
+            await asyncio.sleep(1)
 
     try:
         process_scraped_flights(db, scraped_data_payload)
@@ -227,6 +277,7 @@ async def run_nouvelair_job(db: Session):
             f"A fatal error occurred while reporting Nouvelair data. Run aborted. Error: {e}"
         )
         raise
+
     logger.info("--- Nouvelair scraper run finished successfully ---")
 
 
@@ -238,6 +289,7 @@ async def _get_tunisair_exchange_rate(session: httpx.AsyncClient) -> float:
             f"EXCHANGE_RATE_API_KEY not found. Using fallback rate: 1 TND = {fallback_eur_rate:.4f} EUR"
         )
         return fallback_eur_rate
+
     url = TUNISAIR_EXCHANGE_RATE_API_URL.format(api_key=api_key)
     for attempt in range(TUNISAIR_REQUEST_RETRIES):
         try:
@@ -250,12 +302,13 @@ async def _get_tunisair_exchange_rate(session: httpx.AsyncClient) -> float:
                     f"Successfully fetched exchange rate: 1 TND = {rate:.4f} EUR"
                 )
                 return rate
-        except httpx.RequestError as e:
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.warning(
                 f"Attempt {attempt + 1}/{TUNISAIR_REQUEST_RETRIES} to fetch exchange rate failed: {e}"
             )
             if attempt < TUNISAIR_REQUEST_RETRIES - 1:
-                time.sleep(1)
+                await asyncio.sleep(1)
+
     logger.error(
         f"Failed to fetch exchange rate after {TUNISAIR_REQUEST_RETRIES} attempts. Using fallback."
     )
@@ -323,6 +376,7 @@ async def _scrape_tunisair_route(
         (today + relativedelta(months=i)).strftime("%Y-%m-01")
         for i in range(1, TUNISAIR_MONTHS_TO_SEARCH)
     ]
+
     for search_date in search_dates:
         params = {
             "date": search_date,
@@ -338,12 +392,13 @@ async def _scrape_tunisair_route(
                 response.raise_for_status()
                 html_view = response.json().get("view", "")
                 break
-            except httpx.RequestError as e:
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 logger.warning(
-                    f"Attempt {attempt + 1}/{TUNISAIR_REQUEST_RETRIES} failed for Tunisair {dep_code}->{arr_code} on {search_date}: {e}"
+                    f"Attempt {attempt + 1}/{TUNISAIR_REQUEST_RETRIES} failed for "
+                    f"Tunisair {dep_code}->{arr_code} on {search_date}: {e}"
                 )
                 if attempt < TUNISAIR_REQUEST_RETRIES - 1:
-                    time.sleep(1)
+                    await asyncio.sleep(1)
 
         if html_view:
             extracted_flights = _extract_tunisair_prices(
@@ -355,9 +410,11 @@ async def _scrape_tunisair_route(
             route_flights.extend(extracted_flights)
         else:
             logger.error(
-                f"Failed to fetch Tunisair data for {dep_code}->{arr_code} on {search_date} after retries."
+                f"Failed to fetch Tunisair data for {dep_code}->{arr_code} "
+                f"on {search_date} after retries."
             )
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
+
     return route_flights
 
 
@@ -367,18 +424,15 @@ async def run_tunisair_job(db: Session):
     all_scraped_flights = []
 
     async with httpx.AsyncClient() as session:
-        logger.info(
-            "--- Scraping Tunisair flights from Germany to Tunisia (EUR native) ---"
-        )
+        conversion_rate = await _get_tunisair_exchange_rate(session)
+
+        logger.info("--- Scraping Tunisair: Germany -> Tunisia (EUR) ---")
         for dep, arr in TUNISAIR_VALID_ROUTES_DE_TO_TN:
             all_scraped_flights.extend(
                 await _scrape_tunisair_route(session, dep, arr, is_eur_native=True)
             )
 
-        logger.info(
-            "--- Scraping Tunisair flights from Tunisia to Germany (TND native) ---"
-        )
-        conversion_rate = await _get_tunisair_exchange_rate(session)
+        logger.info("--- Scraping Tunisair: Tunisia -> Germany (TND) ---")
         for dep, arr in TUNISAIR_VALID_ROUTES_TN_TO_DE:
             all_scraped_flights.extend(
                 await _scrape_tunisair_route(
