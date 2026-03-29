@@ -2,7 +2,7 @@
 
 A RESTful backend API for tracking, scraping, and monitoring flight data to and from Tunisia. Built with **FastAPI** and **PostgreSQL**, supporting price history tracking, email alert subscriptions, and automated flight data scraping.
 
-**Frontend:** [tunifly.onrender.com](https://tunifly.onrender.com) • [Frontend repo](https://github.com/WassimSellami/TuniFly-Frontend)
+**Website:** [tunifly.onrender.com](https://tunifly.onrender.com) • [Frontend repo](https://github.com/WassimSellami/tunifly-frontend)
 
 ## Features
 
@@ -37,7 +37,7 @@ A RESTful backend API for tracking, scraping, and monitoring flight data to and 
 ### Installation
 
 ```bash
-git clone https://github.com/WassimSellami/TuniFly-backend.git
+git clone https://github.com/WassimSellami/tunifly-backend.git
 cd TuniFly-backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
