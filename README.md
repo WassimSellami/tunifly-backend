@@ -49,9 +49,22 @@ playwright install
 Create a `.env` file in the root:
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/tunifly
-CORS_ORIGINS=http://localhost:3000
+DATABASE_URL=
+EMAIL_USER=
+EMAIL_PASS=
+CORS_ORIGINS=
+EXCHANGE_RATE_API_KEY=
+USE_PREDEFINED_ROUTES=true
 ```
+
+| Variable                | Description                                              |
+|-------------------------|----------------------------------------------------------|
+| `DATABASE_URL`          | PostgreSQL connection string                             |
+| `EMAIL_USER`            | Email address used to send price alert notifications     |
+| `EMAIL_PASS`            | Password / app password for the email account            |
+| `CORS_ORIGINS`          | Comma-separated list of allowed frontend origins         |
+| `EXCHANGE_RATE_API_KEY` | API key for currency exchange rate lookups               |
+| `USE_PREDEFINED_ROUTES` | Whether to use predefined routes (`true` / `false`)      |
 
 ### Run
 
