@@ -1,4 +1,4 @@
-# Tunisia Flights Backend
+# TuniFly Backend
 
 A RESTful backend API for tracking, scraping, and monitoring flight data to and from Tunisia. Built with **FastAPI** and **PostgreSQL**, supporting price history tracking, email alert subscriptions, and automated flight data scraping.
 
