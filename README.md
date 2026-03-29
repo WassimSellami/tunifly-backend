@@ -2,6 +2,8 @@
 
 A RESTful backend API for tracking, scraping, and monitoring flight data to and from Tunisia. Built with **FastAPI** and **PostgreSQL**, supporting price history tracking, email alert subscriptions, and automated flight data scraping.
 
+**Frontend:** [tunifly.onrender.com](https://tunifly.onrender.com) • [Frontend repo](https://github.com/WassimSellami/TuniFly-Frontend)
+
 ## Features
 
 - **Flight & Airline & Airport APIs** – Query flights, airlines, and airports
@@ -35,8 +37,8 @@ A RESTful backend API for tracking, scraping, and monitoring flight data to and 
 ### Installation
 
 ```bash
-git clone https://github.com/WassimSellami/tunisia-flights-backend.git
-cd tunisia-flights-backend
+git clone https://github.com/WassimSellami/TuniFly-backend.git
+cd TuniFly-backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 playwright install
@@ -47,7 +49,7 @@ playwright install
 Create a `.env` file in the root:
 
 ```env
-DATABASE_URL=postgresql://user:password@localhost:5432/tunisia_flights
+DATABASE_URL=postgresql://user:password@localhost:5432/tunifly
 CORS_ORIGINS=http://localhost:3000
 ```
 
@@ -62,8 +64,8 @@ Swagger docs available at `http://localhost:10000/docs`.
 ## Docker
 
 ```bash
-docker build -t tunisia-flights-backend .
-docker run -p 10000:10000 --env-file .env tunisia-flights-backend
+docker build -t tunifly-backend .
+docker run -p 10000:10000 --env-file .env tunifly-backend
 ```
 
 ## API Endpoints
