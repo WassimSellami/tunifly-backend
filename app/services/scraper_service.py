@@ -253,11 +253,12 @@ async def run_nouvelair_job(db: Session):
                     if price <= 0:
                         continue
                     departure_date = datetime.strptime(f["date"], "%Y-%m-%d")
-                    price_eur = round(price * conversion_rate, 2)
+                    # Nouvelair returns prices already in EUR
+                    price_eur = round(price, 2)
                     scraped_data_payload.flights.append(
                         schemas.ScrapedFlight(
                             departureDate=departure_date,
-                            price=price,
+                            price=price_eur,
                             priceEur=price_eur,
                             departureAirportCode=dep_code,
                             arrivalAirportCode=arr_code,
