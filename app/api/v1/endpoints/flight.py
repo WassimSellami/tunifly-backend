@@ -20,9 +20,19 @@ def get_db():
         db.close()
 
 
-def add_booking_url_to_flight(db_flight: models.Flight) -> str | None:
+def to_flight_out(
+    db_flight: models.Flight,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> schemas.FlightOut:
     flight_out = schemas.FlightOut.model_validate(db_flight)
-    return booking_url_service.generate_booking_url(db_flight)
+    return flight_out.model_copy(
+        update={
+            "minPrice": min_price,
+            "maxPrice": max_price,
+            "bookingUrl": booking_url_service.generate_booking_url(db_flight),
+        }
+    )
 
 
 @router.get("/", response_model=List[schemas.FlightOut])
@@ -30,9 +40,11 @@ def read_flights(
     db: Session = Depends(get_db),
     departureAirportCodes: Optional[List[str]] = Query(None),
     arrivalAirportCodes: Optional[List[str]] = Query(None),
-    startDate: Optional[date] = Query(None),
+    startDate: date = Query(default_factory=date.today),
     endDate: Optional[date] = Query(None),
     airlineCodes: Optional[List[str]] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     db_flights = flight.get_flights_with_min_max(
         db,
@@ -41,20 +53,13 @@ def read_flights(
         start_date=startDate,
         end_date=endDate,
         airline_codes=airlineCodes,
+        limit=limit,
+        offset=offset,
     )
 
     return [
-        schemas.FlightOut(
-            **{
-                k: v
-                for k, v in schemas.FlightOut.from_orm(flight).dict().items()
-                if k not in ("minPrice", "maxPrice", "bookingUrl")
-            },
-            minPrice=min_price,
-            maxPrice=max_price,
-            bookingUrl=add_booking_url_to_flight(flight),
-        )
-        for flight, min_price, max_price in db_flights
+        to_flight_out(db_flight, min_price, max_price)
+        for db_flight, min_price, max_price in db_flights
     ]
 
 
@@ -63,7 +68,7 @@ def read_flight(flight_id: int, db: Session = Depends(get_db)):
     db_flight = flight.get_flight(db, flight_id)
     if not db_flight:
         raise HTTPException(status_code=404, detail="Flight not found")
-    return add_booking_url_to_flight(db_flight)
+    return to_flight_out(db_flight)
 
 
 @router.post("/", response_model=schemas.FlightOut)

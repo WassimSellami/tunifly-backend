@@ -1,4 +1,13 @@
-from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from app.db.base import Base
 
 
@@ -11,6 +20,13 @@ class Flight(Base):
             "arrivalAirportCode",
             "airlineCode",
             name="uq_flights_identity",
+        ),
+        Index(
+            "ix_flights_search",
+            "departureAirportCode",
+            "arrivalAirportCode",
+            "airlineCode",
+            "departureDate",
         ),
     )
 

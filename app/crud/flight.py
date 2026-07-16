@@ -1,14 +1,12 @@
 from sqlalchemy.orm import Session
+from datetime import date, datetime, time, timedelta
+
 from sqlalchemy import func
 from app.db import models, schemas
 
 
 def get_flight(db: Session, flight_id: int):
     return db.query(models.Flight).filter(models.Flight.id == flight_id).first()
-
-
-from sqlalchemy import func
-
 
 def get_flights_with_min_max(
     db: Session,
@@ -17,19 +15,19 @@ def get_flights_with_min_max(
     start_date=None,
     end_date=None,
     airline_codes=None,
+    limit=100,
+    offset=0,
 ):
-    subq = (
+    q = (
         db.query(
-            models.FlightPriceHistory.flightId.label("flight_id"),
+            models.Flight,
             func.min(models.FlightPriceHistory.priceEur).label("min_price"),
             func.max(models.FlightPriceHistory.priceEur).label("max_price"),
         )
-        .group_by(models.FlightPriceHistory.flightId)
-        .subquery()
-    )
-
-    q = db.query(models.Flight, subq.c.min_price, subq.c.max_price).outerjoin(
-        subq, models.Flight.id == subq.c.flight_id
+        .outerjoin(
+            models.FlightPriceHistory,
+            models.Flight.id == models.FlightPriceHistory.flightId,
+        )
     )
 
     if departure_airport_codes:
@@ -37,13 +35,29 @@ def get_flights_with_min_max(
     if arrival_airport_codes:
         q = q.filter(models.Flight.arrivalAirportCode.in_(arrival_airport_codes))
     if start_date:
-        q = q.filter(models.Flight.departureDate >= start_date)
+        start_datetime = (
+            datetime.combine(start_date, time.min)
+            if isinstance(start_date, date) and not isinstance(start_date, datetime)
+            else start_date
+        )
+        q = q.filter(models.Flight.departureDate >= start_datetime)
     if end_date:
-        q = q.filter(models.Flight.departureDate <= end_date)
+        end_datetime = (
+            datetime.combine(end_date + timedelta(days=1), time.min)
+            if isinstance(end_date, date) and not isinstance(end_date, datetime)
+            else end_date
+        )
+        q = q.filter(models.Flight.departureDate < end_datetime)
     if airline_codes:
         q = q.filter(models.Flight.airlineCode.in_(airline_codes))
 
-    return q.all()
+    return (
+        q.group_by(models.Flight.id)
+        .order_by(models.Flight.departureDate, models.Flight.priceEur, models.Flight.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
 
 def create_flight(db: Session, flight: schemas.FlightCreate) -> models.Flight:
