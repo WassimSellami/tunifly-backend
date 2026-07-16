@@ -1,9 +1,19 @@
-from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, UniqueConstraint
 from app.db.base import Base
 
 
 class Flight(Base):
     __tablename__ = "flights"
+    __table_args__ = (
+        UniqueConstraint(
+            "departureDate",
+            "departureAirportCode",
+            "arrivalAirportCode",
+            "airlineCode",
+            name="uq_flights_identity",
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     departureDate = Column(DateTime, index=True, nullable=False)
     price = Column(Float, nullable=False)
