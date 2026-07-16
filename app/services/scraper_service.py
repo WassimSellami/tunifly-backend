@@ -10,9 +10,10 @@ import httpx
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
 from playwright.async_api import async_playwright
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
-from app.crud import flight, flight_price_history, airport
+from app.crud import airport
 from app.db import models, schemas
 
 logger = logging.getLogger(__name__)
@@ -61,58 +62,103 @@ TUNISAIR_VALID_ROUTES_TN_TO_DE: List[Tuple[str, str]] = [
 
 
 def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
+    """Insert and update one scraped batch in a single database transaction."""
     updated_flights_for_alerting = []
-    new_flights_count = 0
-    updated_prices_count = 0
+    if not payload.flights:
+        logger.info("Processed report: 0 new flights, 0 updated prices.")
+        return updated_flights_for_alerting
 
-    for scraped_flight in payload.flights:
-        existing_flight = (
+    def identity(scraped_flight):
+        return (
+            scraped_flight.departureDate,
+            scraped_flight.departureAirportCode,
+            scraped_flight.arrivalAirportCode,
+            scraped_flight.airlineCode,
+        )
+
+    identities = [identity(scraped_flight) for scraped_flight in payload.flights]
+    now = datetime.now()
+
+    try:
+        existing_flights = (
             db.query(models.Flight)
             .filter(
-                models.Flight.departureDate == scraped_flight.departureDate,
-                models.Flight.departureAirportCode
-                == scraped_flight.departureAirportCode,
-                models.Flight.arrivalAirportCode == scraped_flight.arrivalAirportCode,
-                models.Flight.airlineCode == scraped_flight.airlineCode,
+                tuple_(
+                    models.Flight.departureDate,
+                    models.Flight.departureAirportCode,
+                    models.Flight.arrivalAirportCode,
+                    models.Flight.airlineCode,
+                ).in_(identities)
             )
-            .first()
+            .all()
         )
-        now = datetime.now()
-        if not existing_flight:
-            new_flight_db = flight.create_flight(
-                db, flight=schemas.FlightCreate(**scraped_flight.model_dump())
+        existing_by_identity = {
+            (
+                existing.departureDate,
+                existing.departureAirportCode,
+                existing.arrivalAirportCode,
+                existing.airlineCode,
+            ): existing
+            for existing in existing_flights
+        }
+
+        new_flights = []
+        history_records = []
+        updated_prices_count = 0
+
+        for scraped_flight in payload.flights:
+            flight_identity = identity(scraped_flight)
+            existing_flight = existing_by_identity.get(flight_identity)
+            if existing_flight is None:
+                new_flight = models.Flight(**scraped_flight.model_dump())
+                new_flights.append(new_flight)
+                existing_by_identity[flight_identity] = new_flight
+                history_records.append(
+                    models.FlightPriceHistory(
+                        flight=new_flight,
+                        price=scraped_flight.price,
+                        priceEur=scraped_flight.priceEur,
+                        timestamp=now,
+                    )
+                )
+                continue
+
+            native_price_changed = (
+                abs(float(existing_flight.price) - float(scraped_flight.price)) > 0.01
             )
-            new_flights_count += 1
-            history_data = schemas.FlightPriceHistoryCreate(
-                flightId=new_flight_db.id,
-                price=scraped_flight.price,
-                priceEur=scraped_flight.priceEur,
-                timestamp=now,
-            )
-            flight_price_history.create_price_history(db, history_data)
-        else:
-            if abs(float(existing_flight.price) - float(scraped_flight.price)) > 0.01:
+            if native_price_changed:
                 old_price_eur = existing_flight.priceEur
-                update_data = schemas.FlightUpdate(
-                    price=scraped_flight.price, priceEur=scraped_flight.priceEur
-                )
-                flight.update_flight(
-                    db, flight_id=existing_flight.id, flight_update=update_data
-                )
+                existing_flight.price = scraped_flight.price
+                existing_flight.priceEur = scraped_flight.priceEur
                 updated_prices_count += 1
-                history_data = schemas.FlightPriceHistoryCreate(
-                    flightId=existing_flight.id,
-                    price=scraped_flight.price,
-                    priceEur=scraped_flight.priceEur,
-                    timestamp=now,
+                history_records.append(
+                    models.FlightPriceHistory(
+                        flight=existing_flight,
+                        price=scraped_flight.price,
+                        priceEur=scraped_flight.priceEur,
+                        timestamp=now,
+                    )
                 )
-                flight_price_history.create_price_history(db, history_data)
                 updated_flights_for_alerting.append(
                     {"flight": existing_flight, "old_price_eur": old_price_eur}
                 )
 
+        if new_flights:
+            db.add_all(new_flights)
+
+        if history_records:
+            db.add_all(history_records)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to process scraped flight batch; transaction rolled back.")
+        raise
+
     logger.info(
-        f"Processed report: {new_flights_count} new flights, {updated_prices_count} updated prices."
+        "Processed report: %s new flights, %s updated prices.",
+        len(new_flights),
+        updated_prices_count,
     )
     return updated_flights_for_alerting
 
