@@ -7,11 +7,11 @@ from app.api.v1.endpoints import (
     airline,
     flight,
     flight_price_history,
-    scraper,
     subscription,
     airport,
     user,
 )
+from app.services.scraper_scheduler import create_scraper_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +27,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("✅ Main backend service starting up...")
-    yield
+    scraper_scheduler = create_scraper_scheduler()
+    scraper_scheduler.start()
+    logger.info("Hourly scraper scheduler started.")
+    try:
+        yield
+    finally:
+        scraper_scheduler.shutdown(wait=False)
+        logger.info("Hourly scraper scheduler stopped.")
     logger.info("🛑 Main backend service shutting down.")
 
 
@@ -50,7 +57,6 @@ async def ping():
 
 
 app.include_router(user.router)
-app.include_router(scraper.router)
 app.include_router(airline.router)
 app.include_router(flight.router)
 app.include_router(flight_price_history.router)

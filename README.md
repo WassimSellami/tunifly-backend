@@ -92,4 +92,3 @@ docker run -p 10000:10000 --env-file .env tunifly-backend
 | `/flight`               | Flight search & listing      |
 | `/flight-price-history` | Price history per flight     |
 | `/subscription`         | Email alert subscriptions    |
-| `/scraper`              | Trigger scraping jobs        |
