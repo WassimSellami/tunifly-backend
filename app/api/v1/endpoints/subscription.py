@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query  # type: ignore
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List
 
 from app.db import schemas
 from app.crud import subscription
@@ -19,19 +19,10 @@ def get_db():
 
 @router.get("/", response_model=List[schemas.SubscriptionOut])
 def read_subscriptions(
-    email: Optional[str] = Query(None), db: Session = Depends(get_db)
+    email: str = Query(..., description="User email to filter subscriptions"),
+    db: Session = Depends(get_db),
 ):
-    if email:
-        return subscription.get_subscriptions_by_email(db, email=email)
-    return subscription.get_subscriptions(db)
-
-
-@router.get("/{subscription_id}", response_model=schemas.SubscriptionOut)
-def read_subscription(subscription_id: int, db: Session = Depends(get_db)):
-    db_subscription = subscription.get_subscription(db, subscription_id)
-    if not db_subscription:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-    return db_subscription
+    return subscription.get_subscriptions_by_email(db, email=email)
 
 
 @router.get("/flight/{flight_id}", response_model=schemas.SubscriptionOut)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException  # type: ignore
+from fastapi import APIRouter, Depends  # type: ignore
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -20,26 +20,3 @@ def get_db():
 @router.get("/flight/{flight_id}", response_model=List[schemas.FlightPriceHistoryOut])
 def read_price_history(flight_id: int, db: Session = Depends(get_db)):
     return flight_price_history.get_price_history(db, flight_id)
-
-
-@router.get("/{record_id}", response_model=schemas.FlightPriceHistoryOut)
-def read_price_history_by_id(record_id: int, db: Session = Depends(get_db)):
-    record = flight_price_history.get_price_history_by_id(db, record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Price history record not found")
-    return record
-
-
-@router.post("/", response_model=schemas.FlightPriceHistoryOut)
-def create_price_history(
-    price: schemas.FlightPriceHistoryCreate, db: Session = Depends(get_db)
-):
-    return flight_price_history.create_price_history(db, price)
-
-
-@router.delete("/{record_id}", response_model=schemas.FlightPriceHistoryOut)
-def delete_price_history(record_id: int, db: Session = Depends(get_db)):
-    deleted = flight_price_history.delete_price_history(db, record_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Price history record not found")
-    return deleted

@@ -69,28 +69,3 @@ def read_flight(flight_id: int, db: Session = Depends(get_db)):
     if not db_flight:
         raise HTTPException(status_code=404, detail="Flight not found")
     return to_flight_out(db_flight)
-
-
-@router.post("/", response_model=schemas.FlightOut)
-def create_flight(flight_data: schemas.FlightCreate, db: Session = Depends(get_db)):
-    return flight.create_flight(db, flight=flight_data)
-
-
-@router.put("/{flight_id}", response_model=schemas.FlightOut)
-def update_flight(
-    flight_id: int,
-    flight_update: schemas.FlightUpdate,
-    db: Session = Depends(get_db),
-):
-    updated = flight.update_flight(db, flight_id, flight_update)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Flight not found")
-    return updated
-
-
-@router.delete("/{flight_id}", response_model=schemas.FlightOut)
-def delete_flight(flight_id: int, db: Session = Depends(get_db)):
-    deleted = flight.delete_flight(db, flight_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Flight not found")
-    return deleted
