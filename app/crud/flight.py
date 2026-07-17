@@ -28,6 +28,7 @@ def get_flights_with_min_max(
             models.FlightPriceHistory,
             models.Flight.id == models.FlightPriceHistory.flightId,
         )
+        .filter(models.Flight.isAvailable.is_(True))
     )
 
     if departure_airport_codes:

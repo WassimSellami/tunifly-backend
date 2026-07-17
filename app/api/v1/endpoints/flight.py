@@ -66,6 +66,6 @@ def read_flights(
 @router.get("/{flight_id}", response_model=schemas.FlightOut)
 def read_flight(flight_id: int, db: Session = Depends(get_db)):
     db_flight = flight.get_flight(db, flight_id)
-    if not db_flight:
+    if not db_flight or not db_flight.isAvailable:
         raise HTTPException(status_code=404, detail="Flight not found")
     return to_flight_out(db_flight)
