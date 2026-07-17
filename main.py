@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.api.v1.endpoints import (
     airline,
     flight,
@@ -41,6 +42,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 origins = os.getenv("CORS_ORIGINS", "").split(",")
+
+app.add_middleware(
+    RateLimitMiddleware,
+)
 
 app.add_middleware(
     CORSMiddleware,
