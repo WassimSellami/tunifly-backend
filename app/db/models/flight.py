@@ -1,5 +1,7 @@
 from sqlalchemy import (
     Column,
+    Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -28,6 +30,10 @@ class Flight(Base):
             "airlineCode",
             "departureDate",
         ),
+        CheckConstraint(
+            '"consecutiveMisses" >= 0',
+            name="ck_flights_consecutive_misses_nonnegative",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -39,3 +45,5 @@ class Flight(Base):
     )
     arrivalAirportCode = Column(String(10), ForeignKey("airports.code"), nullable=False)
     airlineCode = Column(String(10), ForeignKey("airlines.code"), nullable=False)
+    isAvailable = Column(Boolean, nullable=False, default=True, server_default="true")
+    consecutiveMisses = Column(Integer, nullable=False, default=0, server_default="0")

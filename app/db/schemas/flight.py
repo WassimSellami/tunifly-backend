@@ -27,6 +27,7 @@ class FlightUpdate(BaseModel):
 
 class FlightOut(FlightBase):
     id: int
+    isAvailable: bool
     bookingUrl: Optional[str] = None
     minPrice: Optional[float] = None
     maxPrice: Optional[float] = None

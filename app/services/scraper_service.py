@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
 from playwright.async_api import async_playwright
-from sqlalchemy import tuple_
+from sqlalchemy import and_, or_, tuple_
 from sqlalchemy.orm import Session
 
 from app.crud import airport
@@ -61,10 +61,15 @@ TUNISAIR_VALID_ROUTES_TN_TO_DE: List[Tuple[str, str]] = [
 ]
 
 
-def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
+def process_scraped_flights(
+    db: Session,
+    payload: schemas.ScrapedDataPayload,
+    airline_code: str,
+    successful_routes: set[tuple[str, str]],
+):
     """Insert and update one scraped batch in a single database transaction."""
     updated_flights_for_alerting = []
-    if not payload.flights:
+    if not successful_routes and not payload.flights:
         logger.info("Processed report: 0 new flights, 0 updated prices.")
         return updated_flights_for_alerting
 
@@ -76,19 +81,32 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
             scraped_flight.airlineCode,
         )
 
-    identities = [identity(scraped_flight) for scraped_flight in payload.flights]
+    scraped_identities = {
+        identity(scraped_flight) for scraped_flight in payload.flights
+    }
     now = datetime.now()
+    today = datetime.combine(date.today(), datetime.min.time())
 
     try:
         existing_flights = (
             db.query(models.Flight)
             .filter(
-                tuple_(
-                    models.Flight.departureDate,
-                    models.Flight.departureAirportCode,
-                    models.Flight.arrivalAirportCode,
-                    models.Flight.airlineCode,
-                ).in_(identities)
+                or_(
+                    tuple_(
+                        models.Flight.departureDate,
+                        models.Flight.departureAirportCode,
+                        models.Flight.arrivalAirportCode,
+                        models.Flight.airlineCode,
+                    ).in_(scraped_identities),
+                    and_(
+                        tuple_(
+                            models.Flight.departureAirportCode,
+                            models.Flight.arrivalAirportCode,
+                        ).in_(successful_routes),
+                        models.Flight.airlineCode == airline_code,
+                        models.Flight.departureDate >= today,
+                    ),
+                )
             )
             .all()
         )
@@ -105,6 +123,7 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
         new_flights = []
         history_records = []
         updated_prices_count = 0
+        unavailable_flights_count = 0
 
         for scraped_flight in payload.flights:
             flight_identity = identity(scraped_flight)
@@ -122,6 +141,9 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
                     )
                 )
                 continue
+
+            existing_flight.consecutiveMisses = 0
+            existing_flight.isAvailable = True
 
             native_price_changed = (
                 abs(float(existing_flight.price) - float(scraped_flight.price)) > 0.01
@@ -143,6 +165,20 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
                     {"flight": existing_flight, "old_price_eur": old_price_eur}
                 )
 
+        for flight_identity, existing_flight in existing_by_identity.items():
+            if flight_identity in scraped_identities:
+                continue
+            route = (
+                existing_flight.departureAirportCode,
+                existing_flight.arrivalAirportCode,
+            )
+            if route not in successful_routes:
+                continue
+            existing_flight.consecutiveMisses += 1
+            if existing_flight.consecutiveMisses >= 3 and existing_flight.isAvailable:
+                existing_flight.isAvailable = False
+                unavailable_flights_count += 1
+
         if new_flights:
             db.add_all(new_flights)
 
@@ -156,9 +192,11 @@ def process_scraped_flights(db: Session, payload: schemas.ScrapedDataPayload):
         raise
 
     logger.info(
-        "Processed report: %s new flights, %s updated prices.",
+        "Processed report: %s new flights, %s updated prices, "
+        "%s newly unavailable flights.",
         len(new_flights),
         updated_prices_count,
+        unavailable_flights_count,
     )
     return updated_flights_for_alerting
 
@@ -210,7 +248,7 @@ async def _get_or_refresh_nouvelair_api_key() -> str | None:
 
 async def _get_nouvelair_flight_availability(
     session: httpx.AsyncClient, dep_code: str, dest_code: str
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], bool]:
     api_key = await _get_or_refresh_nouvelair_api_key()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -241,21 +279,37 @@ async def _get_nouvelair_flight_availability(
             async with _nouvelair_lock:
                 global _nouvelair_api_key
                 _nouvelair_api_key = None
-            return []
+            return [], False
 
         res.raise_for_status()
-        return res.json().get("data", [])
+        data = res.json().get("data", [])
+        if not isinstance(data, list):
+            logger.error(
+                "Invalid Nouvelair response for %s->%s: data is not a list.",
+                dep_code,
+                dest_code,
+            )
+            return [], False
+        return data, True
+    except ValueError as e:
+        logger.error(
+            "Invalid JSON fetching Nouvelair availability for %s->%s: %s",
+            dep_code,
+            dest_code,
+            e,
+        )
+        return [], False
     except httpx.HTTPStatusError as e:
         logger.error(
             f"HTTP error fetching Nouvelair availability for {dep_code}->{dest_code}: "
             f"{e.response.status_code} {e.response.text[:200]}"
         )
-        return []
+        return [], False
     except httpx.RequestError as e:
         logger.error(
             f"Network error fetching Nouvelair availability for {dep_code}->{dest_code}: {e}"
         )
-        return []
+        return [], False
 
 
 async def run_nouvelair_job(db: Session):
@@ -285,14 +339,17 @@ async def run_nouvelair_job(db: Session):
 
     logger.info(f"Scraping {len(routes)} Nouvelair routes...")
     scraped_data_payload = schemas.ScrapedDataPayload(flights=[])
+    successful_routes: set[tuple[str, str]] = set()
 
     async with httpx.AsyncClient() as session:
         conversion_rate = await _get_tunisair_exchange_rate(session)
 
         for dep_code, arr_code in routes:
-            flights_data = await _get_nouvelair_flight_availability(
+            flights_data, route_succeeded = await _get_nouvelair_flight_availability(
                 session, dep_code, arr_code
             )
+            if route_succeeded:
+                successful_routes.add((dep_code, arr_code))
             for f in flights_data:
                 try:
                     price = float(f["price"])
@@ -318,7 +375,12 @@ async def run_nouvelair_job(db: Session):
             await asyncio.sleep(1)
 
     try:
-        process_scraped_flights(db, scraped_data_payload)
+        process_scraped_flights(
+            db,
+            scraped_data_payload,
+            airline_code=NOUVELAIR_AIRLINE_CODE,
+            successful_routes=successful_routes,
+        )
     except Exception as e:
         logger.critical(
             f"A fatal error occurred while reporting Nouvelair data. Run aborted. Error: {e}"
@@ -412,12 +474,13 @@ async def _scrape_tunisair_route(
     arr_code: str,
     is_eur_native: bool,
     conversion_rate: float = 1.0,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], bool]:
     base_url = TUNISAIR_BASE_URL_TN
     if is_eur_native:
         base_url = TUNISAIR_BASE_URL_BE if dep_code == "BRU" else TUNISAIR_BASE_URL_DE
 
     route_flights = []
+    route_succeeded = True
     today = date.today()
     search_dates = [today.strftime("%Y-%m-%d")] + [
         (today + relativedelta(months=i)).strftime("%Y-%m-01")
@@ -433,13 +496,15 @@ async def _scrape_tunisair_route(
             "tripType": TUNISAIR_DEFAULT_TRIP_TYPE,
         }
         html_view = None
+        request_succeeded = False
         for attempt in range(TUNISAIR_REQUEST_RETRIES):
             try:
                 response = await session.get(base_url, params=params, timeout=20)
                 response.raise_for_status()
                 html_view = response.json().get("view", "")
+                request_succeeded = True
                 break
-            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            except (ValueError, httpx.RequestError, httpx.HTTPStatusError) as e:
                 logger.warning(
                     f"Attempt {attempt + 1}/{TUNISAIR_REQUEST_RETRIES} failed for "
                     f"Tunisair {dep_code}->{arr_code} on {search_date}: {e}"
@@ -447,7 +512,13 @@ async def _scrape_tunisair_route(
                 if attempt < TUNISAIR_REQUEST_RETRIES - 1:
                     await asyncio.sleep(1)
 
-        if html_view:
+        if not request_succeeded:
+            route_succeeded = False
+            logger.error(
+                f"Failed to fetch Tunisair data for {dep_code}->{arr_code} "
+                f"on {search_date} after retries."
+            )
+        elif html_view:
             extracted_flights = _extract_tunisair_prices(
                 html_view, is_eur_native, conversion_rate
             )
@@ -455,41 +526,41 @@ async def _scrape_tunisair_route(
                 flight_data["departureAirportCode"] = dep_code
                 flight_data["arrivalAirportCode"] = arr_code
             route_flights.extend(extracted_flights)
-        else:
-            logger.error(
-                f"Failed to fetch Tunisair data for {dep_code}->{arr_code} "
-                f"on {search_date} after retries."
-            )
         await asyncio.sleep(0.5)
 
-    return route_flights
+    return route_flights, route_succeeded
 
 
 async def run_tunisair_job(db: Session):
     logger.info("--- Starting Tunisair scraper run ---")
 
     all_scraped_flights = []
+    successful_routes: set[tuple[str, str]] = set()
 
     async with httpx.AsyncClient() as session:
         conversion_rate = await _get_tunisair_exchange_rate(session)
 
         logger.info("--- Scraping Tunisair: Germany -> Tunisia (EUR) ---")
         for dep, arr in TUNISAIR_VALID_ROUTES_DE_TO_TN:
-            all_scraped_flights.extend(
-                await _scrape_tunisair_route(session, dep, arr, is_eur_native=True)
+            route_flights, route_succeeded = await _scrape_tunisair_route(
+                session, dep, arr, is_eur_native=True
             )
+            all_scraped_flights.extend(route_flights)
+            if route_succeeded:
+                successful_routes.add((dep, arr))
 
         logger.info("--- Scraping Tunisair: Tunisia -> Germany (TND) ---")
         for dep, arr in TUNISAIR_VALID_ROUTES_TN_TO_DE:
-            all_scraped_flights.extend(
-                await _scrape_tunisair_route(
-                    session,
-                    dep,
-                    arr,
-                    is_eur_native=False,
-                    conversion_rate=conversion_rate,
-                )
+            route_flights, route_succeeded = await _scrape_tunisair_route(
+                session,
+                dep,
+                arr,
+                is_eur_native=False,
+                conversion_rate=conversion_rate,
             )
+            all_scraped_flights.extend(route_flights)
+            if route_succeeded:
+                successful_routes.add((dep, arr))
 
     scraped_data_payload = schemas.ScrapedDataPayload(flights=[])
     for flight_dict in all_scraped_flights:
@@ -505,7 +576,12 @@ async def run_tunisair_job(db: Session):
         )
 
     try:
-        process_scraped_flights(db, scraped_data_payload)
+        process_scraped_flights(
+            db,
+            scraped_data_payload,
+            airline_code=TUNISAIR_AIRLINE_CODE,
+            successful_routes=successful_routes,
+        )
     except Exception as e:
         logger.critical(
             f"A fatal error occurred while reporting Tunisair data. Run aborted. Error: {e}"
