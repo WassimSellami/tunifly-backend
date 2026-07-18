@@ -5,7 +5,11 @@ from typing import List, Optional
 
 def get_subscriptions_by_user_id(db: Session, user_id: str) -> List[models.Subscription]:
     return (
-        db.query(models.Subscription).filter(models.Subscription.userId == user_id).all()
+        db.query(models.Subscription)
+        .join(models.Flight, models.Subscription.flightId == models.Flight.id)
+        .filter(models.Subscription.userId == user_id)
+        .filter(models.Flight.isAvailable.is_(True))
+        .all()
     )
 
 
@@ -14,8 +18,10 @@ def get_subscription_by_flight_and_user_id(
 ) -> Optional[models.Subscription]:
     return (
         db.query(models.Subscription)
+        .join(models.Flight, models.Subscription.flightId == models.Flight.id)
         .filter(models.Subscription.flightId == flight_id)
         .filter(models.Subscription.userId == user_id)
+        .filter(models.Flight.isAvailable.is_(True))
         .first()
     )
 
@@ -57,8 +63,10 @@ def get_active_subscriptions_for_flight_with_notifications_enabled(
     return (
         db.query(models.Subscription)
         .join(models.User, models.Subscription.userId == models.User.id)
+        .join(models.Flight, models.Subscription.flightId == models.Flight.id)
         .filter(models.Subscription.flightId == flight_id)
         .filter(models.Subscription.isActive == True)
+        .filter(models.Flight.isAvailable.is_(True))
         .filter(models.User.enableNotificationsSetting == True)
         .all()
     )

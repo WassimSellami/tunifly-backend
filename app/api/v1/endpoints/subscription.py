@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.db import schemas
-from app.crud import subscription
+from app.crud import flight, subscription
 from app.db.session import SessionLocal
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.crud import user
@@ -47,6 +47,9 @@ def create_subscription(
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    db_flight = flight.get_flight(db, sub.flightId)
+    if not db_flight or not db_flight.isAvailable:
+        raise HTTPException(status_code=404, detail="Flight not found")
     user.get_or_create_user(db, current_user.id, current_user.email)
     return subscription.create_subscription(db, sub, current_user.id)
 

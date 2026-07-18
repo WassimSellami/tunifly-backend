@@ -90,21 +90,6 @@ uvicorn main:app --reload --port 10000
 
 Swagger docs available at `http://localhost:10000/docs`.
 
-### Supabase authentication
-
-Enable Google as a provider in Supabase Auth. The frontend must send the
-Supabase access token in `Authorization: Bearer <access_token>` for every
-`/users/me` and `/subscriptions` request. The API verifies that token, stores
-its `sub` as the local user ID, and stores its Google/Supabase `email` in the
-`users` table. It never accepts either value from the request body.
-
-Before deploying, apply [`migrations/001_supabase_auth.sql`](migrations/001_supabase_auth.sql), then
-[`migrations/002_finalize_supabase_auth.sql`](migrations/002_finalize_supabase_auth.sql)
-when legacy email-only records have been removed or backfilled.
-The migration deliberately requires a decision for existing email-only users:
-backfill their Supabase IDs, or retire those legacy subscriptions before
-enforcing the final `NOT NULL` constraints listed in the file.
-
 ## Docker
 
 ```bash
