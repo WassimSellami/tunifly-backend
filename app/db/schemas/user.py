@@ -10,13 +10,9 @@ class UserBase(BaseModel):
         from_attributes = True
 
 
-class UserCreate(UserBase):
-    pass
-
-
 class UserUpdate(BaseModel):
     enableNotificationsSetting: Optional[bool] = None
 
 
 class UserOut(UserBase):
-    pass
+    id: str

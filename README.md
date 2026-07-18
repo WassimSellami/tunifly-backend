@@ -60,6 +60,9 @@ RATE_LIMIT_WINDOW_SECONDS=60
 RATE_LIMIT_EXEMPT_PATHS=/docs,/redoc,/openapi.json,/ping
 EXCHANGE_RATE_API_KEY=
 USE_PREDEFINED_ROUTES=true
+SUPABASE_URL=https://your-project.supabase.co
+# Required only for legacy Supabase projects that issue HS256 access tokens
+SUPABASE_JWT_SECRET=
 ```
 
 | Variable                     | Description                                        |
@@ -74,6 +77,8 @@ USE_PREDEFINED_ROUTES=true
 | `RATE_LIMIT_EXEMPT_PATHS`    | Comma-separated paths excluded from throttling    |
 | `EXCHANGE_RATE_API_KEY`      | API key for currency exchange rate lookups        |
 | `USE_PREDEFINED_ROUTES`      | Whether to use predefined routes (`true` / `false`) |
+| `SUPABASE_URL`               | Supabase project URL used to validate access-token issuer and signing keys |
+| `SUPABASE_JWT_SECRET`        | Legacy HS256 JWT secret; leave unset for modern JWKS-backed projects |
 
 By default, the backend allows `60` requests per `60` seconds per client IP on most routes and `20` requests per `60` seconds on `GET /flights/`, `GET /flights/{flight_id}`, and `GET /price-history/flight/{flight_id}`. Successful responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Rate-limited responses return HTTP `429` with a `Retry-After` header.
 
@@ -84,6 +89,21 @@ uvicorn main:app --reload --port 10000
 ```
 
 Swagger docs available at `http://localhost:10000/docs`.
+
+### Supabase authentication
+
+Enable Google as a provider in Supabase Auth. The frontend must send the
+Supabase access token in `Authorization: Bearer <access_token>` for every
+`/users/me` and `/subscriptions` request. The API verifies that token, stores
+its `sub` as the local user ID, and stores its Google/Supabase `email` in the
+`users` table. It never accepts either value from the request body.
+
+Before deploying, apply [`migrations/001_supabase_auth.sql`](migrations/001_supabase_auth.sql), then
+[`migrations/002_finalize_supabase_auth.sql`](migrations/002_finalize_supabase_auth.sql)
+when legacy email-only records have been removed or backfilled.
+The migration deliberately requires a decision for existing email-only users:
+backfill their Supabase IDs, or retire those legacy subscriptions before
+enforcing the final `NOT NULL` constraints listed in the file.
 
 ## Docker
 

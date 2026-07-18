@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
@@ -8,4 +9,5 @@ class Subscription(Base):
     flightId = Column(Integer, ForeignKey("flights.id"), index=True, nullable=False)
     targetPrice = Column(Float, nullable=False)
     isActive = Column(Boolean, default=True, nullable=False)
-    email = Column(String(100), ForeignKey("users.email"), nullable=False, index=True)
+    userId = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user = relationship("User")

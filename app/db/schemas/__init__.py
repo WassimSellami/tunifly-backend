@@ -7,7 +7,6 @@ from .flight import FlightOut
 from .flight import ScrapedDataPayload
 from .flight_price_history import FlightPriceHistoryCreate
 from .flight_price_history import FlightPriceHistoryOut
-from .user import UserCreate
 from .user import UserUpdate
 from .user import UserOut
 from .subscription import SubscriptionCreate

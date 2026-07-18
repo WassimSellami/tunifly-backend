@@ -125,9 +125,9 @@ def check_and_send_alerts_for_flights(db: Session, updated_flights_info: list):
             updated_price_eur = db_flight.priceEur
 
             if (old_price_eur > target_price) and (updated_price_eur <= target_price):
-                logger.info(f"ALERT TRIGGERED for {sub.email} on Flight {db_flight.id}")
+                logger.info(f"ALERT TRIGGERED for {sub.user.email} on Flight {db_flight.id}")
                 send_price_alert_email(
-                    to_email=sub.email,
+                    to_email=sub.user.email,
                     flight_details={
                         "originAirportCode": db_flight.departureAirportCode,
                         "arrivalAirportCode": db_flight.arrivalAirportCode,
@@ -139,10 +139,10 @@ def check_and_send_alerts_for_flights(db: Session, updated_flights_info: list):
                 )
 
                 sub_update_schema = schemas.SubscriptionUpdate(isActive=False)
-                crud_subscription.update_subscription(db, sub.id, sub_update_schema)
+                crud_subscription.update_subscription(db, sub.id, sub.userId, sub_update_schema)
                 logger.info(f"Subscription {sub.id} set to inactive after alert.")
             else:
                 logger.debug(
-                    f"Subscription {sub.id} for {sub.email} (Target: {target_price:.2f}€, Prev: {old_price_eur:.2f}€, New: {updated_price_eur:.2f}€) - No alert needed."
+                    f"Subscription {sub.id} for {sub.user.email} (Target: {target_price:.2f}€, Prev: {old_price_eur:.2f}€, New: {updated_price_eur:.2f}€) - No alert needed."
                 )
     logger.info("Finished checking subscriptions for updated flights.")

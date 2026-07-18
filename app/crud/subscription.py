@@ -3,19 +3,19 @@ from app.db import models, schemas
 from typing import List, Optional
 
 
-def get_subscriptions_by_email(db: Session, email: str) -> List[models.Subscription]:
+def get_subscriptions_by_user_id(db: Session, user_id: str) -> List[models.Subscription]:
     return (
-        db.query(models.Subscription).filter(models.Subscription.email == email).all()
+        db.query(models.Subscription).filter(models.Subscription.userId == user_id).all()
     )
 
 
-def get_subscription_by_flight_and_email(
-    db: Session, flight_id: int, email: str
+def get_subscription_by_flight_and_user_id(
+    db: Session, flight_id: int, user_id: str
 ) -> Optional[models.Subscription]:
     return (
         db.query(models.Subscription)
         .filter(models.Subscription.flightId == flight_id)
-        .filter(models.Subscription.email == email)
+        .filter(models.Subscription.userId == user_id)
         .first()
     )
 
@@ -26,6 +26,17 @@ def get_subscription(
     return (
         db.query(models.Subscription)
         .filter(models.Subscription.id == subscription_id)
+        .first()
+    )
+
+
+def get_subscription_for_user(
+    db: Session, subscription_id: int, user_id: str
+) -> Optional[models.Subscription]:
+    return (
+        db.query(models.Subscription)
+        .filter(models.Subscription.id == subscription_id)
+        .filter(models.Subscription.userId == user_id)
         .first()
     )
 
@@ -45,7 +56,7 @@ def get_active_subscriptions_for_flight_with_notifications_enabled(
     """
     return (
         db.query(models.Subscription)
-        .join(models.User, models.Subscription.email == models.User.email)
+        .join(models.User, models.Subscription.userId == models.User.id)
         .filter(models.Subscription.flightId == flight_id)
         .filter(models.Subscription.isActive == True)
         .filter(models.User.enableNotificationsSetting == True)
@@ -54,9 +65,9 @@ def get_active_subscriptions_for_flight_with_notifications_enabled(
 
 
 def create_subscription(
-    db: Session, subscription: schemas.SubscriptionCreate
+    db: Session, subscription: schemas.SubscriptionCreate, user_id: str
 ) -> models.Subscription:
-    db_subscription = models.Subscription(**subscription.model_dump())
+    db_subscription = models.Subscription(**subscription.model_dump(), userId=user_id)
     db_subscription.isActive = True  # type: ignore
     db.add(db_subscription)
     db.commit()
@@ -65,9 +76,12 @@ def create_subscription(
 
 
 def update_subscription(
-    db: Session, subscription_id: int, subscription_update: schemas.SubscriptionUpdate
+    db: Session,
+    subscription_id: int,
+    user_id: str,
+    subscription_update: schemas.SubscriptionUpdate,
 ) -> Optional[models.Subscription]:
-    db_subscription = get_subscription(db, subscription_id)
+    db_subscription = get_subscription_for_user(db, subscription_id, user_id)
     if not db_subscription:
         return None
     
@@ -91,9 +105,9 @@ def update_subscription(
 
 
 def delete_subscription(
-    db: Session, subscription_id: int
+    db: Session, subscription_id: int, user_id: str
 ) -> Optional[models.Subscription]:
-    db_subscription = get_subscription(db, subscription_id)
+    db_subscription = get_subscription_for_user(db, subscription_id, user_id)
     if not db_subscription:
         return None
     db.delete(db_subscription)
