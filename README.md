@@ -88,7 +88,7 @@ By default, the backend allows `60` requests per `60` seconds per client IP on m
 uvicorn main:app --reload --port 10000
 ```
 
-Swagger docs available at `http://localhost:10000/docs`.
+Swagger, ReDoc, and the OpenAPI schema endpoints are disabled.
 
 ## Docker
 
