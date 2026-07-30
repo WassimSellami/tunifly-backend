@@ -72,7 +72,7 @@ class RateLimitMiddleware:
         self.window_seconds = window_seconds or _env_int("RATE_LIMIT_WINDOW_SECONDS", 60)
         self.exempt_paths = exempt_paths or _env_paths(
             "RATE_LIMIT_EXEMPT_PATHS",
-            "/docs,/redoc,/openapi.json,/ping",
+            "",
         )
         self.route_limits = route_limits or (
             ("/flights/", ("GET",), self.heavy_route_max_requests),

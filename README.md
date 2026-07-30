@@ -57,7 +57,10 @@ CORS_ORIGINS=
 RATE_LIMIT_REQUESTS=60
 RATE_LIMIT_HEAVY_ROUTE_REQUESTS=20
 RATE_LIMIT_WINDOW_SECONDS=60
-RATE_LIMIT_EXEMPT_PATHS=/docs,/redoc,/openapi.json,/ping
+RATE_LIMIT_EXEMPT_PATHS=/docs,/redoc,/openapi.json
+# Comma-separated proxy IPs/networks trusted to supply X-Forwarded-For.
+# Do not use * when the app can be reached directly from the internet.
+FORWARDED_ALLOW_IPS=10.0.0.0/8
 EXCHANGE_RATE_API_KEY=
 USE_PREDEFINED_ROUTES=true
 SUPABASE_URL=https://your-project.supabase.co
@@ -75,12 +78,15 @@ SUPABASE_JWT_SECRET=
 | `RATE_LIMIT_HEAVY_ROUTE_REQUESTS` | Limit for `GET /flights/`, `GET /flights/{flight_id}`, and `GET /price-history/flight/{flight_id}` |
 | `RATE_LIMIT_WINDOW_SECONDS`  | Size of the rate-limit window in seconds          |
 | `RATE_LIMIT_EXEMPT_PATHS`    | Comma-separated paths excluded from throttling    |
+| `FORWARDED_ALLOW_IPS`        | Comma-separated trusted proxy IPs or CIDR networks allowed to provide forwarded client IPs |
 | `EXCHANGE_RATE_API_KEY`      | API key for currency exchange rate lookups        |
 | `USE_PREDEFINED_ROUTES`      | Whether to use predefined routes (`true` / `false`) |
 | `SUPABASE_URL`               | Supabase project URL used to validate access-token issuer and signing keys |
 | `SUPABASE_JWT_SECRET`        | Legacy HS256 JWT secret; leave unset for modern JWKS-backed projects |
 
-By default, the backend allows `60` requests per `60` seconds per client IP on most routes and `20` requests per `60` seconds on `GET /flights/`, `GET /flights/{flight_id}`, and `GET /price-history/flight/{flight_id}`. Successful responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Rate-limited responses return HTTP `429` with a `Retry-After` header.
+By default, the backend allows `60` requests per `60` seconds per client IP on most routes, including `GET /ping`, and `20` requests per `60` seconds on `GET /flights/`, `GET /flights/{flight_id}`, and `GET /price-history/flight/{flight_id}`. Successful responses include `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers. Rate-limited responses return HTTP `429` with a `Retry-After` header.
+
+When the service is behind a reverse proxy, Uvicorn uses `X-Forwarded-For` only when the immediate proxy's address is included in `FORWARDED_ALLOW_IPS`. Set this to the actual proxy addresses or private network ranges used by your platform. Never set it to `*` if clients can connect directly to the service, because they could spoof their IP address and evade rate limiting.
 
 ### Run
 
