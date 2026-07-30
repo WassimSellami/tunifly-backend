@@ -342,8 +342,6 @@ async def run_nouvelair_job(db: Session):
     successful_routes: set[tuple[str, str]] = set()
 
     async with httpx.AsyncClient() as session:
-        conversion_rate = await _get_tunisair_exchange_rate(session)
-
         for dep_code, arr_code in routes:
             flights_data, route_succeeded = await _get_nouvelair_flight_availability(
                 session, dep_code, arr_code

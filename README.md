@@ -15,6 +15,68 @@ A RESTful backend API for tracking, scraping, and monitoring flight data to and 
 - Booking URL generation
 - Docker support
 
+## Tunisair fare-calendar endpoints
+
+The Tunisair scraper obtains fare calendars from market-specific endpoints:
+
+| Market | Endpoint |
+|--------|----------|
+| Germany | `https://flights.tunisair.com/en-de/prices/per-day` |
+| Belgium | `https://flights.tunisair.com/en-be/prices/per-day` |
+| Tunisia | `https://flights.tunisair.com/en-tn/prices/per-day` |
+
+The Germany and Belgium endpoints (`TUNISAIR_BASE_URL_DE` and
+`TUNISAIR_BASE_URL_BE`) were identified by inspecting the browser network calls
+made by Tunisair booking pages, such as
+`https://flights.tunisair.com/fr-tn/TUN-MUC`, and by testing other destination
+pages. They are not a documented public API.
+
+Each endpoint accepts fare-calendar query parameters such as:
+
+```text
+?date=YYYY-MM-DD&from=AAA&to=BBB&tripDuration=0&tripType=O
+```
+
+### Currency and price conversion
+
+The scraper keeps both the fare as returned by the airline (`price`) and a
+normalized EUR value (`priceEur`) used for comparisons, price history, ordering,
+and email-alert thresholds.
+
+| Source | Native fare currency | `priceEur` handling |
+|--------|----------------------|---------------------|
+| Nouvelair | EUR | Stored unchanged |
+| Tunisair, Germany/Belgium to Tunisia | EUR | Stored unchanged |
+| Tunisair, Tunisia to Germany/Belgium | TND | Converted to EUR by the backend |
+
+For Tunisia-origin Tunisair routes, the fare calendar returns TND. The backend
+multiplies that amount by the TND-to-EUR rate returned by ExchangeRate-API; it
+uses `0.29` as a fallback when the provider is unavailable. This is an external
+EUR-equivalent calculation, not a conversion calculated or guaranteed by
+Tunisair, so the final airline checkout price can differ.
+
+## Nouvelair availability endpoint
+
+Nouvelair flight availability is retrieved from:
+
+```text
+https://webapi.nouvelair.com/api/reservation/availability
+```
+
+The endpoint requires a temporary `x-api-key`. The scraper opens
+`https://www.nouvelair.com/` in a headless browser and captures that header from
+one of the website's own API requests before querying availability. The key is
+not hard-coded and may expire between scraper runs.
+
+The availability request uses parameters such as:
+
+```text
+?departure_code=FRA&destination_code=TUN&trip_type=1&currency_id=2
+```
+
+The scraper requests Nouvelair's EUR currency setting (`currency_id=2`). It
+therefore stores each returned fare unchanged in both `price` and `priceEur`.
+
 ## Tech Stack
 
 | Layer         | Technology                         |
