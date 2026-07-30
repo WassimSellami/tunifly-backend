@@ -1,10 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 
 class SubscriptionBase(BaseModel):
     flightId: int
-    targetPrice: float
+    targetPrice: float = Field(ge=1, allow_inf_nan=False)
 
     class Config:
         from_attributes = True
@@ -16,7 +16,7 @@ class SubscriptionCreate(SubscriptionBase):
 
 class SubscriptionUpdate(BaseModel):
     flightId: Optional[int] = None
-    targetPrice: Optional[float] = None
+    targetPrice: Optional[float] = Field(default=None, ge=1, allow_inf_nan=False)
     isActive: Optional[bool] = None
     enableEmailNotifications: Optional[bool] = None
 

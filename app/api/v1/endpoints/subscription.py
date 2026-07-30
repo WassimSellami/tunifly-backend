@@ -19,6 +19,14 @@ def get_db():
         db.close()
 
 
+def _validate_target_price(target_price: float, current_price: float) -> None:
+    if target_price >= current_price:
+        raise HTTPException(
+            status_code=422,
+            detail="Target price must be lower than the flight's current price.",
+        )
+
+
 @router.get("/", response_model=List[schemas.SubscriptionOut])
 def read_subscriptions(
     current_user: AuthenticatedUser = Depends(get_current_user),
@@ -50,6 +58,7 @@ def create_subscription(
     db_flight = flight.get_flight(db, sub.flightId)
     if not db_flight or not db_flight.isAvailable:
         raise HTTPException(status_code=404, detail="Flight not found")
+    _validate_target_price(sub.targetPrice, db_flight.priceEur)
     user.get_or_create_user(db, current_user.id, current_user.email)
     return subscription.create_subscription(db, sub, current_user.id)
 
@@ -61,6 +70,28 @@ def update_subscription(
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    existing_subscription = subscription.get_subscription_for_user(
+        db, subscription_id, current_user.id
+    )
+    if not existing_subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    if sub_update.flightId is not None or sub_update.targetPrice is not None:
+        flight_id = (
+            sub_update.flightId
+            if sub_update.flightId is not None
+            else existing_subscription.flightId
+        )
+        db_flight = flight.get_flight(db, flight_id)
+        if not db_flight or not db_flight.isAvailable:
+            raise HTTPException(status_code=404, detail="Flight not found")
+        target_price = (
+            sub_update.targetPrice
+            if sub_update.targetPrice is not None
+            else existing_subscription.targetPrice
+        )
+        _validate_target_price(target_price, db_flight.priceEur)
+
     updated = subscription.update_subscription(db, subscription_id, current_user.id, sub_update)
     if not updated:
         raise HTTPException(status_code=404, detail="Subscription not found")
