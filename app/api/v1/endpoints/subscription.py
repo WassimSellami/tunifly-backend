@@ -60,7 +60,21 @@ def create_subscription(
         raise HTTPException(status_code=404, detail="Flight not found")
     _validate_target_price(sub.targetPrice, db_flight.priceEur)
     user.get_or_create_user(db, current_user.id, current_user.email)
-    return subscription.create_subscription(db, sub, current_user.id)
+    existing_subscription = subscription.get_subscription_by_flight_and_user_id(
+        db, sub.flightId, current_user.id
+    )
+    if existing_subscription:
+        raise HTTPException(
+            status_code=409,
+            detail="A subscription for this flight already exists.",
+        )
+    try:
+        return subscription.create_subscription(db, sub, current_user.id)
+    except subscription.DuplicateSubscriptionError:
+        raise HTTPException(
+            status_code=409,
+            detail="A subscription for this flight already exists.",
+        )
 
 
 @router.put("/{subscription_id}", response_model=schemas.SubscriptionOut)
@@ -92,7 +106,24 @@ def update_subscription(
         )
         _validate_target_price(target_price, db_flight.priceEur)
 
-    updated = subscription.update_subscription(db, subscription_id, current_user.id, sub_update)
+        duplicate_subscription = subscription.get_subscription_by_flight_and_user_id(
+            db, flight_id, current_user.id
+        )
+        if duplicate_subscription and duplicate_subscription.id != subscription_id:
+            raise HTTPException(
+                status_code=409,
+                detail="A subscription for this flight already exists.",
+            )
+
+    try:
+        updated = subscription.update_subscription(
+            db, subscription_id, current_user.id, sub_update
+        )
+    except subscription.DuplicateSubscriptionError:
+        raise HTTPException(
+            status_code=409,
+            detail="A subscription for this flight already exists.",
+        )
     if not updated:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return updated
