@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.crud import airport
 from app.db import models, schemas
+from app.services import email_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -373,12 +374,13 @@ async def run_nouvelair_job(db: Session):
             await asyncio.sleep(1)
 
     try:
-        process_scraped_flights(
+        updated_flights = process_scraped_flights(
             db,
             scraped_data_payload,
             airline_code=NOUVELAIR_AIRLINE_CODE,
             successful_routes=successful_routes,
         )
+        email_alerts.check_and_send_alerts_for_flights(db, updated_flights)
     except Exception as e:
         logger.critical(
             f"A fatal error occurred while reporting Nouvelair data. Run aborted. Error: {e}"
@@ -574,12 +576,13 @@ async def run_tunisair_job(db: Session):
         )
 
     try:
-        process_scraped_flights(
+        updated_flights = process_scraped_flights(
             db,
             scraped_data_payload,
             airline_code=TUNISAIR_AIRLINE_CODE,
             successful_routes=successful_routes,
         )
+        email_alerts.check_and_send_alerts_for_flights(db, updated_flights)
     except Exception as e:
         logger.critical(
             f"A fatal error occurred while reporting Tunisair data. Run aborted. Error: {e}"

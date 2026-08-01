@@ -8,16 +8,12 @@ from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
 from app.crud import subscription as crud_subscription
-from app.db import schemas
 from app.services import booking_url_service
 
 load_dotenv()
 
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
-
-if not EMAIL_USER or not EMAIL_PASS:
-    raise ValueError("EMAIL_USER and EMAIL_PASS must be set in environment variables")
 
 logger = logging.getLogger("flight_alerts")
 logger.setLevel(logging.INFO)
@@ -30,6 +26,12 @@ logger.addHandler(handler)
 def send_price_alert_email(
     to_email: str, flight_details: dict, target_price: float, current_price: float
 ):
+    if not EMAIL_USER or not EMAIL_PASS:
+        logger.error(
+            "Price alert email was not sent because EMAIL_USER or EMAIL_PASS is not configured."
+        )
+        return
+
     raw_date = flight_details.get("departureDate")
     day_format_specifier = "%#d" if platform.system() == "Windows" else "%-d"
 
@@ -65,7 +67,7 @@ def send_price_alert_email(
             <strong>💰 Current Price:</strong> {current_price:.2f}€
         </p>
         {link_html}
-        <p><i>Note: You will no longer receive alerts for this flight unless you reactivate it.</i></p>
+        <p><i>We will continue to notify you when this flight crosses your target price.</i></p>
         <p>Happy travels! 🧳</p>
     </body>
     </html>
@@ -83,7 +85,7 @@ def send_price_alert_email(
         f"🎯 Your Target Price: {target_price:.2f}€\n"
         f"💰 Current Price: {current_price:.2f}€\n"
         f"{plain_text_book_now_link}"
-        f"📩 Note: You will no longer receive alerts for this flight unless you reactivate it.\n\n"
+        f"📩 We will continue to notify you when this flight crosses your target price.\n\n"
         f"Happy travels! 🧳\n"
     )
 
@@ -138,9 +140,6 @@ def check_and_send_alerts_for_flights(db: Session, updated_flights_info: list):
                     current_price=updated_price_eur,
                 )
 
-                sub_update_schema = schemas.SubscriptionUpdate(isActive=False)
-                crud_subscription.update_subscription(db, sub.id, sub.userId, sub_update_schema)
-                logger.info(f"Subscription {sub.id} set to inactive after alert.")
             else:
                 logger.debug(
                     f"Subscription {sub.id} for {sub.user.email} (Target: {target_price:.2f}€, Prev: {old_price_eur:.2f}€, New: {updated_price_eur:.2f}€) - No alert needed."
