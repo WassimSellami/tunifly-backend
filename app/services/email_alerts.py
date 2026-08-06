@@ -2,8 +2,7 @@ import os
 import platform
 import logging
 from datetime import datetime
-from email.message import EmailMessage
-import smtplib
+import requests
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
@@ -12,8 +11,8 @@ from app.services import booking_url_service
 
 load_dotenv()
 
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM")
 
 logger = logging.getLogger("flight_alerts")
 logger.setLevel(logging.INFO)
@@ -23,15 +22,59 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
+def _send_email(to_email: str, subject: str, plain_text: str, html: str) -> bool:
+    if not RESEND_API_KEY or not EMAIL_FROM:
+        logger.error(
+            "Email was not sent because RESEND_API_KEY or EMAIL_FROM is not configured."
+        )
+        return False
+
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "User-Agent": "tunifly-backend/1.0",
+            },
+            json={
+                "from": EMAIL_FROM,
+                "to": [to_email],
+                "subject": subject,
+                "text": plain_text,
+                "html": html,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        logger.error(f"Failed to send email to {to_email}: {e}")
+        return False
+
+
+def send_welcome_email(to_email: str) -> None:
+    subject = "Welcome to TuniFly"
+    plain_text = (
+        "Welcome to TuniFly!\n\n"
+        "You can now track flights and create price alerts. "
+        "We will email you when a watched flight reaches your target price.\n\n"
+        "Happy travels!"
+    )
+    html = """
+    <html><body>
+        <h2>Welcome to TuniFly!</h2>
+        <p>You can now track flights and create price alerts.</p>
+        <p>We will email you when a watched flight reaches your target price.</p>
+        <p>Happy travels!</p>
+    </body></html>
+    """
+    if _send_email(to_email, subject, plain_text, html):
+        logger.info(f"Welcome email sent to {to_email}")
+
+
 def send_price_alert_email(
     to_email: str, flight_details: dict, target_price: float, current_price: float
 ):
-    if not EMAIL_USER or not EMAIL_PASS:
-        logger.error(
-            "Price alert email was not sent because EMAIL_USER or EMAIL_PASS is not configured."
-        )
-        return
-
     raw_date = flight_details.get("departureDate")
     day_format_specifier = "%#d" if platform.system() == "Windows" else "%-d"
 
@@ -89,20 +132,8 @@ def send_price_alert_email(
         f"Happy travels! 🧳\n"
     )
 
-    msg = EmailMessage()
-    msg["From"] = EMAIL_USER
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.set_content(plain_text_body)
-    msg.add_alternative(html_body, subtype="html")
-
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(EMAIL_USER, EMAIL_PASS)
-            smtp.send_message(msg)
+    if _send_email(to_email, subject, plain_text_body, html_body):
         logger.info(f"Email sent to {to_email}")
-    except Exception as e:
-        logger.error(f"Failed to send email to {to_email}: {e}")
 
 
 def check_and_send_alerts_for_flights(db: Session, updated_flights_info: list):

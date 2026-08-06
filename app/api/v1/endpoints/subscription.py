@@ -7,6 +7,7 @@ from app.crud import flight, subscription
 from app.db.session import SessionLocal
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.crud import user
+from app.services import email_alerts
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -59,7 +60,11 @@ def create_subscription(
     if not db_flight or not db_flight.isAvailable:
         raise HTTPException(status_code=404, detail="Flight not found")
     _validate_target_price(sub.targetPrice, db_flight.priceEur)
-    user.get_or_create_user(db, current_user.id, current_user.email)
+    db_user, was_created = user.get_or_create_user_with_status(
+        db, current_user.id, current_user.email
+    )
+    if was_created:
+        email_alerts.send_welcome_email(db_user.email)
     existing_subscription = subscription.get_subscription_by_flight_and_user_id(
         db, sub.flightId, current_user.id
     )

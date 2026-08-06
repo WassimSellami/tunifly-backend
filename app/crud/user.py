@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.db import models, schemas
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 
 def get_user(db: Session, user_id: str) -> Optional[models.User]:
@@ -13,19 +13,27 @@ def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[models.User]
 
 def get_or_create_user(db: Session, user_id: str, email: str) -> models.User:
     """Synchronize a local profile from verified Supabase token claims."""
+    db_user, _ = get_or_create_user_with_status(db, user_id, email)
+    return db_user
+
+
+def get_or_create_user_with_status(
+    db: Session, user_id: str, email: str
+) -> Tuple[models.User, bool]:
+    """Synchronize a local profile and report whether it was newly created."""
     db_user = get_user(db, user_id)
     if db_user:
         if db_user.email != email:
             db_user.email = email
             db.commit()
             db.refresh(db_user)
-        return db_user
+        return db_user, False
 
     db_user = models.User(id=user_id, email=email)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+    return db_user, True
 
 
 def update_user(

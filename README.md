@@ -113,8 +113,8 @@ Create a `.env` file in the root:
 
 ```env
 DATABASE_URL=
-EMAIL_USER=
-EMAIL_PASS=
+RESEND_API_KEY=
+EMAIL_FROM=TuniFly Alerts <alerts@your-domain.com>
 CORS_ORIGINS=
 RATE_LIMIT_REQUESTS=60
 RATE_LIMIT_HEAVY_ROUTE_REQUESTS=20
@@ -133,8 +133,8 @@ SUPABASE_JWT_SECRET=
 | Variable                     | Description                                        |
 |------------------------------|----------------------------------------------------|
 | `DATABASE_URL`               | PostgreSQL connection string                      |
-| `EMAIL_USER`                 | Email address used to send price alert emails     |
-| `EMAIL_PASS`                 | Password or app password for the email account    |
+| `RESEND_API_KEY`             | API key for sending price-alert emails through Resend |
+| `EMAIL_FROM`                 | Verified Resend sender, e.g. `TuniFly Alerts <alerts@your-domain.com>` |
 | `CORS_ORIGINS`               | Comma-separated list of allowed frontend origins  |
 | `RATE_LIMIT_REQUESTS`        | Default maximum requests allowed per client in each window |
 | `RATE_LIMIT_HEAVY_ROUTE_REQUESTS` | Limit for `GET /flights/`, `GET /flights/{flight_id}`, and `GET /price-history/flight/{flight_id}` |
