@@ -186,7 +186,7 @@ def check_and_send_alerts_for_flights(db: Session, updated_flights_info: list):
             db, db_flight.id
         )
 
-        booking_url = booking_url_service.generate_nouvelair_booking_url(db_flight)
+        booking_url = booking_url_service.generate_booking_url(db_flight)
 
         for sub in subscriptions:
             target_price = sub.targetPrice
